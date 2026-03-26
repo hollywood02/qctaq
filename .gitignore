@@ -1,0 +1,36 @@
+node_modules/
+.venv_qctaq/
+__pycache__/
+*.pyc
+
+# Environment / secrets
+.env
+
+# Database
+*.db
+
+# Debug artifacts
+captcha_debug_*.png
+captcha_auto_solve.png
+debug_*.png
+debug_*.html
+*.log
+solver_debug.log
+
+# Chromedriver binaries
+chromedriver_*
+
+# OS files
+.DS_Store
+
+# Runtime data
+decisions_pdf/
+*.json
+!package.json
+
+# VPN configs (sensitive)
+configs/
+
+# pytest
+.pytest_cache/
+tests/__pycache__/

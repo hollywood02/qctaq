@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QCTAQ Scraper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<!-- -- Top bar -- -->
+<header>
+  <div class="logo">QCTAQ<span>SCRAPER</span></div>
+  <div class="live-badge">
+    <div class="pulse" id="pulse"></div>
+    <span id="connText">connecting</span>
+  </div>
+</header>
+
+<!-- -- Hero stats -- -->
+<div class="hero">
+  <div class="hero-stat">
+    <div class="hero-num" id="heroTotal">0</div>
+    <div class="hero-lbl">TOTAL CASES</div>
+  </div>
+  <div class="hero-stat">
+    <div class="hero-num accent" id="heroDone">0</div>
+    <div class="hero-lbl">DOWNLOADED</div>
+  </div>
+  <div class="hero-stat">
+    <div class="hero-num dim" id="heroPending">0</div>
+    <div class="hero-lbl">PENDING</div>
+  </div>
+  <div class="hero-stat">
+    <div class="hero-num speed" id="heroSpeed">0</div>
+    <div class="hero-lbl">/HOUR</div>
+  </div>
+  <div class="hero-stat">
+    <div class="hero-num state-text" id="heroState">idle</div>
+    <div class="hero-lbl">STATUS</div>
+  </div>
+</div>
+
+<!-- -- Grand progress bar -- -->
+<div class="grand-progress">
+  <div class="grand-bar" id="grandBar" style="width:0%"></div>
+  <span class="grand-pct" id="grandPct">0%</span>
+</div>
+
+<!-- -- Content -- -->
+<div class="content">
+
+  <!-- Left: Data view -->
+  <div class="data-panel">
+
+    <!-- Tribunal tabs -->
+    <div class="tabs" id="tribunalTabs">
+      {% for key, trib in tribunals.items() %}
+      <button class="tab {% if loop.first %}active{% endif %}" data-key="{{ key }}" onclick="selectTribunal('{{ key }}')">
+        <span class="tab-key">{{ key }}</span>
+        <span class="tab-stats" id="tab-{{ key }}">—</span>
+      </button>
+      {% endfor %}
+    </div>
+
+    <!-- Year grid -->
+    <div class="year-grid" id="yearGrid"></div>
+
+    <!-- Month detail (shown when clicking a year) -->
+    <div class="month-panel" id="monthPanel" style="display:none">
+      <div class="month-header">
+        <button class="back-btn" onclick="closeMonths()">&larr; Back to years</button>
+        <span class="month-title" id="monthTitle">2024</span>
+      </div>
+      <div class="month-grid" id="monthGrid"></div>
+    </div>
+
+  </div>
+
+  <!-- Right: Controls + log -->
+  <div class="side-panel">
+
+    <div class="ctrl-section">
+      <div class="ctrl-title">DOWNLOAD CONTROLS</div>
+
+      <div class="ctrl-row">
+        <label>Year Range</label>
+        <div class="ctrl-inputs">
+          <input type="number" id="ctrlYearStart" min="2000" max="2030" placeholder="From">
+          <span class="ctrl-sep">-</span>
+          <input type="number" id="ctrlYearEnd" min="2000" max="2030" placeholder="To">
+          <button class="btn-apply" onclick="setYearRange()">Set</button>
+        </div>
+      </div>
+
+      <div class="ctrl-row">
+        <label>Direction</label>
+        <div class="ctrl-inputs">
+          <button class="dir-btn active" id="btnAsc" onclick="setDirection('asc')">Upwards</button>
+          <button class="dir-btn" id="btnDesc" onclick="setDirection('desc')">Downwards</button>
+        </div>
+      </div>
+
+      <div class="ctrl-row">
+        <label>Scraper</label>
+        <div class="ctrl-inputs">
+          <button class="btn-pause" onclick="setState('paused')">Pause</button>
+          <button class="btn-resume" onclick="setState('running')">Resume</button>
+        </div>
+      </div>
+
+      <div class="ctrl-row">
+        <label>Failed</label>
+        <div class="ctrl-inputs">
+          <button class="btn-retry" onclick="retryFailed()">Retry All Failed</button>
+          <span class="ctrl-feedback" id="ctrlFeedback"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Events log -->
+    <div class="log-section">
+      <div class="ctrl-title">ACTIVITY LOG</div>
+      <div class="log" id="eventsLog"></div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+// -- State --
+let selectedTribunal = '{{ tribunals.keys() | list | first }}';
+let evtSource = null;
+let lastEventId = 0;
+let allStats = {};
+
+// -- SSE --
+function connectSSE() {
+  if (evtSource) try { evtSource.close(); } catch(e) {}
+  evtSource = new EventSource('/api/stream');
+  evtSource.onopen = () => {
+    document.getElementById('pulse').classList.add('live');
+    document.getElementById('connText').textContent = 'live';
+  };
+  evtSource.onerror = () => {
+    document.getElementById('pulse').classList.remove('live');
+    document.getElementById('connText').textContent = 'reconnecting';
+  };
+  evtSource.onmessage = (e) => {
+    try { applyUpdate(JSON.parse(e.data)); } catch(err) {}
+  };
+}
+
+function applyUpdate(data) {
+  allStats = data.stats || {};
+  const speed = data.rate_per_hour || 0;
+  const state = data.state || 'idle';
+
+  // Hero stats
+  let gTotal = 0, gDone = 0, gPending = 0;
+  for (const [k, s] of Object.entries(allStats)) {
+    gTotal += s.total || 0;
+    gDone += s.done || 0;
+    gPending += (s.pending || 0) + (s.downloading || 0);
+    // Tab stats
+    const tabEl = document.getElementById('tab-' + k);
+    if (tabEl) {
+      const pct = s.total > 0 ? Math.round((s.done || 0) / s.total * 100) : 0;
+      tabEl.textContent = `${(s.done||0).toLocaleString()} / ${(s.total||0).toLocaleString()} (${pct}%)`;
+    }
+  }
+  animNum('heroTotal', gTotal);
+  animNum('heroDone', gDone);
+  animNum('heroPending', gPending);
+  document.getElementById('heroSpeed').textContent = speed.toLocaleString();
+
+  const stEl = document.getElementById('heroState');
+  stEl.textContent = state;
+  stEl.className = 'hero-num state-text state-' + state;
+
+  // Grand progress
+  const gPct = gTotal > 0 ? (gDone / gTotal * 100) : 0;
+  document.getElementById('grandBar').style.width = gPct.toFixed(1) + '%';
+  document.getElementById('grandPct').textContent = gPct.toFixed(1) + '%';
+
+  // Events
+  renderEvents(data.events || []);
+
+  // Refresh year grid if tribunal data changed
+  if (allStats[selectedTribunal]) renderYears();
+}
+
+function animNum(id, val) {
+  document.getElementById(id).textContent = val.toLocaleString();
+}
+
+// -- Events --
+function renderEvents(events) {
+  if (!events.length) return;
+  const log = document.getElementById('eventsLog');
+  const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 30;
+  const sorted = events.slice().sort((a,b) => a.id - b.id);
+  let added = false;
+  for (const ev of sorted) {
+    if (ev.id <= lastEventId) continue;
+    lastEventId = ev.id;
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    const ts = (ev.created_at || '').split(' ').pop().substring(0,8);
+    line.innerHTML = `<span class="log-time">${esc(ts)}</span><span class="log-type">${esc(ev.event_type||'')}</span><span class="log-msg">${esc(ev.message||'')}</span>`;
+    log.appendChild(line);
+    added = true;
+  }
+  if (added) {
+    while (log.children.length > 300) log.removeChild(log.firstChild);
+    if (atBottom) log.scrollTop = log.scrollHeight;
+  }
+}
+
+// -- Tribunal selection --
+function selectTribunal(key) {
+  selectedTribunal = key;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.key === key));
+  document.getElementById('monthPanel').style.display = 'none';
+  document.getElementById('yearGrid').style.display = '';
+  // Fetch fresh year data
+  fetch('/api/stats/' + key)
+    .then(r => r.json())
+    .then(d => { renderYears(d.years); })
+    .catch(() => {});
+}
+
+function renderYears(years) {
+  if (!years) {
+    // Use cached from SSE
+    fetch('/api/stats/' + selectedTribunal).then(r=>r.json()).then(d=>renderYears(d.years));
+    return;
+  }
+  const grid = document.getElementById('yearGrid');
+  const maxTotal = Math.max(...years.map(y => y.total || 0), 1);
+
+  let html = '';
+  for (const y of years) {
+    const done = y.done || 0;
+    const total = y.total || 0;
+    const pending = y.pending || 0;
+    const failed = y.failed || 0;
+    const pct = total > 0 ? Math.round(done / total * 100) : 0;
+    const donePct = total > 0 ? (done / total * 100).toFixed(1) : 0;
+    const pendPct = total > 0 ? (pending / total * 100).toFixed(1) : 0;
+    const failPct = total > 0 ? (failed / total * 100).toFixed(1) : 0;
+
+    const complete = pct === 100 ? ' complete' : '';
+    html += `
+    <div class="year-card${complete}" onclick="openMonths(${y.year})">
+      <div class="yc-top">
+        <span class="yc-year">${y.year}</span>
+        <span class="yc-pct">${pct}%</span>
+      </div>
+      <div class="yc-bar">
+        <div class="yc-bar-done" style="width:${donePct}%"></div>
+        <div class="yc-bar-fail" style="width:${failPct}%"></div>
+      </div>
+      <div class="yc-nums">
+        <span class="yc-done">${done.toLocaleString()}</span>
+        <span class="yc-sep">/</span>
+        <span class="yc-total">${total.toLocaleString()}</span>
+      </div>
+    </div>`;
+  }
+  grid.innerHTML = html;
+}
+
+// -- Month drill-down --
+function openMonths(year) {
+  document.getElementById('yearGrid').style.display = 'none';
+  document.getElementById('monthPanel').style.display = '';
+  document.getElementById('monthTitle').textContent = selectedTribunal.toUpperCase() + ' ' + year;
+  document.getElementById('monthGrid').innerHTML = '<div class="loading">Loading...</div>';
+
+  fetch(`/api/stats/${selectedTribunal}/${year}`)
+    .then(r => r.json())
+    .then(d => renderMonths(d.months || []))
+    .catch(() => {});
+}
+
+function closeMonths() {
+  document.getElementById('monthPanel').style.display = 'none';
+  document.getElementById('yearGrid').style.display = '';
+}
+
+const MONTH_NAMES = ['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function renderMonths(months) {
+  const grid = document.getElementById('monthGrid');
+  if (!months.length) {
+    grid.innerHTML = '<div class="loading">No data for this year</div>';
+    return;
+  }
+  let html = '';
+  for (const m of months) {
+    const done = m.done || 0;
+    const total = m.total || 0;
+    const pending = m.pending || 0;
+    const pct = total > 0 ? Math.round(done / total * 100) : 0;
+    const donePct = total > 0 ? (done / total * 100).toFixed(1) : 0;
+    const complete = pct === 100 ? ' complete' : '';
+
+    html += `
+    <div class="month-card${complete}">
+      <div class="mc-top">
+        <span class="mc-month">${MONTH_NAMES[m.month] || m.month}</span>
+        <span class="mc-pct">${pct}%</span>
+      </div>
+      <div class="mc-bar">
+        <div class="mc-bar-done" style="width:${donePct}%"></div>
+      </div>
+      <div class="mc-nums">
+        <span class="mc-done">${done.toLocaleString()}</span>
+        <span class="mc-sep">/</span>
+        <span class="mc-total">${total.toLocaleString()}</span>
+      </div>
+    </div>`;
+  }
+  grid.innerHTML = html;
+}
+
+// -- Controls --
+function setYearRange() {
+  const s = document.getElementById('ctrlYearStart').value || '';
+  const e = document.getElementById('ctrlYearEnd').value || '';
+  postControl({year_start: s, year_end: e}, `Range: ${s||'*'} - ${e||'*'}`);
+}
+function setDirection(dir) {
+  postControl({direction: dir}, dir === 'asc' ? 'Oldest first' : 'Newest first');
+  document.getElementById('btnAsc').classList.toggle('active', dir==='asc');
+  document.getElementById('btnDesc').classList.toggle('active', dir==='desc');
+}
+function setState(s) { postControl({state: s}, 'State: ' + s); }
+function retryFailed() {
+  fetch('/api/retry/' + selectedTribunal, {method:'POST'})
+    .then(r=>r.json())
+    .then(d => feedback(d.reset + ' cases reset'));
+}
+function postControl(data, msg) {
+  fetch('/api/control', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)})
+    .then(r=>r.json())
+    .then(() => feedback(msg))
+    .catch(e => feedback('Error: '+e));
+}
+function feedback(msg) {
+  const el = document.getElementById('ctrlFeedback');
+  el.textContent = msg;
+  clearTimeout(el._t);
+  el._t = setTimeout(() => el.textContent = '', 3000);
+}
+function esc(s) { const d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+// -- Init --
+fetch('/api/control').then(r=>r.json()).then(c => {
+  if (c.year_start) document.getElementById('ctrlYearStart').value = c.year_start;
+  if (c.year_end) document.getElementById('ctrlYearEnd').value = c.year_end;
+  if (c.direction) {
+    document.getElementById('btnAsc').classList.toggle('active', c.direction==='asc');
+    document.getElementById('btnDesc').classList.toggle('active', c.direction==='desc');
+  }
+});
+selectTribunal(selectedTribunal);
+connectSSE();
+</script>
+</body>
+</html>
