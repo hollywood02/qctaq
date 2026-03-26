@@ -292,32 +292,9 @@ def vpn_down(conf: str):
         _wg_down(conf)
 
 
-def kill_protonvpn_app():
-    """Kill the ProtonVPN desktop app and its WireGuard system extension."""
-    for proc_name in ["ProtonVPN", "ProtonVPNAgent", "ProtonVPN OpenVPN"]:
-        subprocess.run(["killall", proc_name], capture_output=True, timeout=5)
-    # Kill ProtonVPN's WireGuard system extension (runs as root, holds default route)
-    try:
-        subprocess.run(["sudo", "-n", "killall", "-9",
-                         "ch.protonvpn.mac.WireGuard-Extension"],
-                        capture_output=True, timeout=5)
-    except (subprocess.TimeoutExpired, Exception):
-        pass
-    # Remove any leftover utun routes from the ProtonVPN WireGuard extension
-    try:
-        subprocess.run(["sudo", "-n", "route", "-n", "delete", "default",
-                         "-ifscope", "utun8"],
-                        capture_output=True, timeout=5)
-    except (subprocess.TimeoutExpired, Exception):
-        pass
-    time.sleep(1)
-
-
 def bring_down_all_vpns():
-    """Clean up any stuck VPN from previous runs + kill ProtonVPN app."""
+    """Clean up any stuck VPN from previous runs."""
     global _active_vpn_proc, _active_vpn_conf
-    # Kill ProtonVPN desktop app first -- it auto-connects and interferes
-    kill_protonvpn_app()
     # Kill any lingering openvpn processes
     try:
         subprocess.run(["sudo", "-n", "killall", "openvpn"],
