@@ -303,12 +303,6 @@ def kill_protonvpn_app():
                         capture_output=True, timeout=5)
     except (subprocess.TimeoutExpired, Exception):
         pass
-    # Also kill any IKEv2/IPsec VPN connections the app may have established
-    try:
-        subprocess.run(["sudo", "-n", "killall", "-9", "nesessionmanager"],
-                        capture_output=True, timeout=5)
-    except (subprocess.TimeoutExpired, Exception):
-        pass
     # Remove any leftover utun routes from the ProtonVPN WireGuard extension
     try:
         subprocess.run(["sudo", "-n", "route", "-n", "delete", "default",
