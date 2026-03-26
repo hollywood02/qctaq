@@ -11,7 +11,7 @@ TRIBUNALS = {
         "url_pattern": "https://www.canlii.org/qc/qctaq/nav/date/{year}_{month}",
         "case_selector": 'a[href*="/doc/"]',
         "show_more_selector": "span.showMoreResults",
-        "year_range": (2000, 2026),
+        "year_range": (1998, 2026),
     },
 }
 

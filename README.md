@@ -2,7 +2,7 @@
 
 Scrapes PDF decisions from the **Tribunal administratif du Qu&eacute;bec (QCTAQ)** on CanLII.
 
-Coverage: **2000 to present** (~26 years of Tribunal administratif du Qu&eacute;bec decisions).
+Coverage: **1998 to present** (continuous coverage since 1998-04-01).
 
 ---
 

@@ -108,7 +108,7 @@ def api_start_process(process_type):
     scraper = os.path.join(BASE_DIR, "scraper.py")
 
     if process_type == "collector":
-        start_year = data.get("start_year", "2000")
+        start_year = data.get("start_year", "1998")
         end_year = data.get("end_year", "2026")
         cmd = [python, scraper, "collect", "--tribunal", tribunal,
                "--start-year", str(start_year), "--end-year", str(end_year)]
